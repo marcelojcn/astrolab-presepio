@@ -1,5 +1,5 @@
 /** Status of a Secret Santa event. */
-export type EventStatus = "open" | "picked";
+export type EventStatus = "open" | "picked" | "cancelled";
 
 /** Shape of a record stored in `secret_santa_events`. */
 export interface SecretSantaEvent {
@@ -7,6 +7,7 @@ export interface SecretSantaEvent {
   channel_id: string;
   rules: string;
   exchange_date: string;
+  shuffle_date: string; // Unix timestamp string — when assignments are auto-sent
   created_by: string;
   message_ts: string;
   status: EventStatus;
@@ -78,5 +79,12 @@ export interface SlackClient {
       channel?: { id: string };
       error?: string;
     }>;
+  };
+  workflows: {
+    triggers: {
+      create(
+        params: Record<string, unknown>,
+      ): Promise<{ ok: boolean; error?: string }>;
+    };
   };
 }

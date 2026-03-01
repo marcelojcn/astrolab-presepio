@@ -40,6 +40,13 @@ const setupForm = StartSecretSantaWorkflow.addStep(
           type: Schema.slack.types.date,
         },
         {
+          name: "shuffle_date",
+          title: "Shuffle Date & Time",
+          description:
+            "When assignments will be automatically sent to participants",
+          type: Schema.slack.types.timestamp,
+        },
+        {
           name: "rules",
           title: "Rules / Description",
           description: "Gift-exchange rules that all participants will see",
@@ -47,7 +54,7 @@ const setupForm = StartSecretSantaWorkflow.addStep(
           long: true,
         },
       ],
-      required: ["channel", "exchange_date", "rules"],
+      required: ["channel", "exchange_date", "shuffle_date", "rules"],
     },
   },
 );
@@ -56,6 +63,7 @@ const setupForm = StartSecretSantaWorkflow.addStep(
 StartSecretSantaWorkflow.addStep(SetupSecretSantaFunction, {
   channel_id: setupForm.outputs.fields.channel,
   exchange_date: setupForm.outputs.fields.exchange_date,
+  shuffle_date: setupForm.outputs.fields.shuffle_date,
   rules: setupForm.outputs.fields.rules,
   invoking_user: StartSecretSantaWorkflow.inputs.invoking_user,
 });

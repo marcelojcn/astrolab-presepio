@@ -1,4 +1,5 @@
 import { assertEquals } from "@std/assert";
+import { SetupSecretSantaFunction } from "../functions/setup_secret_santa.ts";
 import { StartSecretSantaWorkflow } from "./start_secret_santa.ts";
 
 Deno.test("StartSecretSantaWorkflow - has correct callback_id", () => {
@@ -27,4 +28,10 @@ Deno.test("StartSecretSantaWorkflow - requires interactivity", () => {
     (required as string[]).includes("interactivity"),
     true,
   );
+});
+
+Deno.test("StartSecretSantaWorkflow - SetupSecretSantaFunction includes shuffle_date", () => {
+  const props =
+    SetupSecretSantaFunction.definition.input_parameters?.properties ?? {};
+  assertEquals("shuffle_date" in props, true);
 });

@@ -6,15 +6,28 @@
 [![GitHub Stars](https://img.shields.io/github/stars/marcelojcn/astrolab-presepio?style=social)](https://github.com/marcelojcn/astrolab-presepio/stargazers)
 [![Known Vulnerabilities](https://snyk.io/test/github/marcelojcn/astrolab-presepio/badge.svg)](https://snyk.io/test/github/marcelojcn/astrolab-presepio)
 
-A Secret Santa Slack automation built with the [Slack Deno SDK](https://docs.slack.dev/tools/deno-slack-sdk/). Organizers set up a gift exchange in seconds — participants join with a single click, and anyone can trigger the shuffle to send private DM assignments.
+A Secret Santa Slack automation built with the [Slack Deno SDK](https://docs.slack.dev/tools/deno-slack-sdk/). Organizers set up a gift exchange in seconds — participants join with a single click, and assignments are sent automatically on a scheduled date via private DM.
 
 ---
 
+## 🎄 The Nativity Scene in Portugal (13th–18th Century)
+
+The **Presépio** (Nativity Scene) is the artistic representation of the birth of Jesus and is one of the deepest traditions in Portuguese culture, evolving from a monastic religious practice into a form of erudite art.
+
+* **Origin:** Introduced in Portugal in the 13th century by **followers of Saint Francis of Assisi** (such as Friar Fabrício), who brought the Italian tradition of recreating the Nativity.
+* **The Golden Century (18th):** Under the reign of King John V, the nativity scene became a piece of ostentation and art. The sculptor **Machado de Castro** was the greatest exponent of this era, creating detailed and expressive clay figures.
+* **Unique Characteristics:**
+    * **Regional Scenery:** Unlike other countries, the Portuguese nativity scene mixes biblical figures with typical folk characters (millers, shepherds, washerwomen) in landscapes reminiscent of Portuguese villages.
+    * **The "Throne":** In certain regions (such as Alentejo or Algarve), the Infant Jesus is placed at the top of a stepped structure (altar), surrounded by flowers and sprouted wheat (*searinhas*).
+
+> **Key Figure:** **Joaquim Machado de Castro**, author of the famous Nativity Scene of the Basílica da Estrela, elevated these compositions to the status of narrative monuments with hundreds of figures.
+
 ## What it does
 
-1. **Admin setup** — An organizer clicks the trigger link, fills in a short form (channel, gift exchange date, rules), and the bot posts an invitation to the chosen channel.
+1. **Admin setup** — An organizer clicks the trigger link, fills in a short form (channel, gift exchange date, shuffle date & time, rules), and the bot posts an invitation to the chosen channel.
 2. **Participants join** — Anyone in the channel clicks **Join Secret Santa** to register. They receive an ephemeral confirmation immediately.
-3. **Shuffle** — When registration is ready, anyone clicks **Shuffle & Send Assignments**. Every participant receives a private DM telling them who they are buying a gift for, along with the rules and exchange date.
+3. **Auto-shuffle** — On the configured shuffle date, Slack automatically sends every participant a private DM with their assignment.
+4. **Cancel** — The organizer can click **Cancel Event** at any time before the shuffle fires to abort the event.
 
 ---
 
@@ -35,11 +48,13 @@ astrolab-presepio/
 ├── datastores/
 │   └── participants.ts             # EventsDatastore + ParticipantsDatastore
 ├── functions/
-│   └── setup_secret_santa.ts      # Core function: setup, join, and shuffle logic
+│   ├── setup_secret_santa.ts      # Setup, join, and cancel logic
+│   └── auto_shuffle.ts            # Scheduled shuffle function
 ├── utils/
 │   └── secret_santa.ts            # Pure helpers: shuffle + derangement algorithm
 ├── workflows/
-│   └── start_secret_santa.ts      # Workflow wiring the setup form → function
+│   ├── start_secret_santa.ts      # Wires the setup form → function
+│   └── auto_shuffle.ts            # Wired to the scheduled trigger
 └── triggers/
     └── start_trigger.ts            # Link trigger definition for admin setup
 ```
@@ -117,28 +132,33 @@ slack trigger create --trigger-def triggers/start_trigger.ts
 
 ### Set up a Secret Santa event
 
-1. Paste the trigger link anywhere in Slack (a message, a channel bookmark, a canvas) and click it.
-2. A modal appears — fill in:
-   - **Channel** — where the invitation will be posted.
-   - **Gift Exchange Date** — the day participants will trade presents.
-   - **Rules / Description** — budget, theme, or any other guidelines.
-3. Click **Launch Event**.
+The trigger link created in Part 2 is a special Slack URL. When pasted into Slack, it renders as a clickable button. A good place for it is a pinned bookmark in the channel where you run your events, so anyone can find and click it.
 
-The bot posts an invitation to the chosen channel with two buttons.
+To open the setup form, click the trigger link. A modal appears — fill in:
+
+- **Channel** — where the invitation will be posted.
+- **Gift Exchange Date** — the day participants will trade presents.
+- **Shuffle Date & Time** — when assignments will be sent automatically.
+- **Rules / Description** — budget, theme, or any other guidelines.
+
+Click **Launch Event**. The bot posts an invitation to the chosen channel and schedules the auto-shuffle.
 
 ### Join the event
 
-Team members in the channel click **Join Secret Santa 🎁**. They receive an ephemeral confirmation visible only to them. The button stays active indefinitely, so latecomers can join at any time.
+Team members in the channel click **Join Secret Santa 🎁**. They receive an ephemeral confirmation visible only to them. The button stays active until the event is cancelled or the shuffle fires.
 
-### Send assignments
+### Auto-shuffle
 
-When registration is closed, anyone clicks **Shuffle & Send Assignments 🎲**. A confirmation dialog appears — click **Yes, send assignments** to proceed.
+On the configured shuffle date, Slack automatically runs the shuffle:
 
 - Each participant receives a **private DM** with the name of the person they are buying a gift for, the exchange date, and the event rules.
 - The channel receives a **public summary** confirming how many assignments were sent.
-- The shuffle can only be run **once per event**.
 
-> **Minimum:** at least 3 participants must have joined before the shuffle can run.
+> **Minimum:** at least 3 participants must have joined before the shuffle runs.
+
+### Cancel the event
+
+To abort the event before assignments go out, click **Cancel Event** on the invitation message. A confirmation dialog appears. Once confirmed, the channel receives a public notice and the scheduled shuffle becomes a no-op.
 
 ---
 
@@ -146,8 +166,10 @@ When registration is closed, anyone clicks **Shuffle & Send Assignments 🎲**. 
 
 - **Datastores** — Two Slack-hosted datastores persist event data and participant lists across users and sessions, with no external database required.
 - **`completed: false`** — The setup function returns this to keep the button handlers alive after the first interaction, allowing multiple users to click Join without the function closing.
+- **Scheduled trigger** — After posting the invitation, the setup function calls `triggers.create` to schedule a one-time trigger pointing at `auto_shuffle_workflow`. The trigger fires on the chosen shuffle date and invokes the shuffle automatically.
 - **Derangement algorithm** — The shuffle uses a Fisher-Yates derangement (up to 20 attempts) to guarantee no one is assigned to buy a gift for themselves.
 - **Composite participant key** — Participant IDs are stored as `event_id#user_id`, making double-joins idempotent and supporting multiple concurrent events in the same workspace.
+- **Cancel safety** — If an event is cancelled before the scheduled trigger fires, the auto-shuffle function detects the `cancelled` status and exits without sending any DMs.
 
 ---
 

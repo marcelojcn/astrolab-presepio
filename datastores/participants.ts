@@ -20,6 +20,9 @@ export const EventsDatastore = DefineDatastore({
     exchange_date: {
       type: Schema.types.string,
     },
+    shuffle_date: {
+      type: Schema.types.string, // Unix timestamp string — when assignments auto-fire
+    },
     created_by: {
       type: Schema.slack.types.user_id,
     },
@@ -27,7 +30,7 @@ export const EventsDatastore = DefineDatastore({
       type: Schema.types.string,
     },
     status: {
-      type: Schema.types.string, // "open" | "picked"
+      type: Schema.types.string, // "open" | "picked" | "cancelled"
     },
   },
 });

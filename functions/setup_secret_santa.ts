@@ -4,7 +4,6 @@ import {
   ParticipantsDatastore,
 } from "../datastores/participants.ts";
 import { type SlackClient } from "../types.ts";
-import { createDerangement } from "../utils/secret_santa.ts";
 
 export const SetupSecretSantaFunction = DefineFunction({
   callback_id: "setup_secret_santa",
@@ -22,6 +21,10 @@ export const SetupSecretSantaFunction = DefineFunction({
         type: Schema.types.string,
         description: "Date when participants will trade presents",
       },
+      shuffle_date: {
+        type: Schema.slack.types.timestamp,
+        description: "Unix timestamp when assignments will be auto-sent",
+      },
       rules: {
         type: Schema.types.string,
         description: "Custom rules/description for this event",
@@ -31,7 +34,13 @@ export const SetupSecretSantaFunction = DefineFunction({
         description: "The admin who set up this event",
       },
     },
-    required: ["channel_id", "exchange_date", "rules", "invoking_user"],
+    required: [
+      "channel_id",
+      "exchange_date",
+      "shuffle_date",
+      "rules",
+      "invoking_user",
+    ],
   },
   output_parameters: {
     properties: {
@@ -45,7 +54,7 @@ export const SetupSecretSantaFunction = DefineFunction({
 });
 
 export const JOIN_ACTION_ID = "join_secret_santa";
-export const SHUFFLE_ACTION_ID = "run_secret_santa";
+export const CANCEL_ACTION_ID = "cancel_secret_santa";
 
 // ---------------------------------------------------------------------------
 // Typed context shapes for SDK callbacks
@@ -56,6 +65,7 @@ export const SHUFFLE_ACTION_ID = "run_secret_santa";
 interface MainHandlerInputs {
   channel_id: string;
   exchange_date: string;
+  shuffle_date: number;
   rules: string;
   invoking_user: string;
 }
@@ -78,7 +88,7 @@ interface BlockActionContext {
 /**
  * Handles a user clicking "Join Secret Santa".
  * Registers the participant in the datastore and sends an ephemeral
- * confirmation (or an "already joined" notice if the user joined before).
+ * confirmation (or an "already joined" / "cancelled" notice as appropriate).
  */
 export async function processJoinAction(
   client: SlackClient,
@@ -99,16 +109,26 @@ export async function processJoinAction(
       channel: channelId,
       user: userId,
       text:
-        "You've already joined this Secret Santa event! :gift: Watch for your DM when assignments are sent.",
+        "You've already joined this Secret Santa event! :gift: Watch for your DM when assignments are sent automatically.",
     });
     return;
   }
 
-  // Fetch event details to include the exchange date in the confirmation
+  // Fetch event details to check status and get exchange date
   const eventResp = await client.apps.datastore.get({
     datastore: EventsDatastore.name,
     id: eventId,
   });
+
+  if (eventResp.ok && eventResp.item?.["status"] === "cancelled") {
+    await client.chat.postEphemeral({
+      channel: channelId,
+      user: userId,
+      text:
+        ":x: This event has been cancelled and is no longer accepting participants.",
+    });
+    return;
+  }
 
   const exchangeDate =
     eventResp.ok && typeof eventResp.item?.["exchange_date"] === "string"
@@ -141,22 +161,20 @@ export async function processJoinAction(
     channel: channelId,
     user: userId,
     text:
-      `:white_check_mark: You're in the Secret Santa!${exchangeDate} You'll receive a DM with your assignment once someone starts the shuffle.`,
+      `:white_check_mark: You're in the Secret Santa!${exchangeDate} Your assignment will be sent automatically on the scheduled date.`,
   });
 }
 
 /**
- * Handles a user clicking "Shuffle & Send Assignments".
- * Validates that the event is still open and has enough participants, then
- * generates a random derangement and sends a DM to every participant.
+ * Handles a user clicking "Cancel Event".
+ * Marks the event as cancelled in the datastore and posts a public notice.
  */
-export async function processShuffleAction(
+export async function processCancelAction(
   client: SlackClient,
   eventId: string,
-  triggeringUser: string,
+  userId: string,
   channelId: string,
 ): Promise<void> {
-  // Validate the event
   const eventResp = await client.apps.datastore.get({
     datastore: EventsDatastore.name,
     id: eventId,
@@ -165,170 +183,32 @@ export async function processShuffleAction(
   if (!eventResp.ok || !eventResp.item?.["event_id"]) {
     await client.chat.postEphemeral({
       channel: channelId,
-      user: triggeringUser,
-      text:
-        ":x: Could not find the Secret Santa event. Please contact the organizer.",
+      user: userId,
+      text: ":x: Could not find the Secret Santa event.",
     });
     return;
   }
 
   const event = eventResp.item;
 
-  if (event["status"] === "picked") {
+  if (event["status"] !== "open") {
     await client.chat.postEphemeral({
       channel: channelId,
-      user: triggeringUser,
+      user: userId,
       text:
-        ":information_source: Assignments have already been sent for this event. Check your DMs!",
+        ":information_source: This event is already closed (assignments have been sent or it was already cancelled).",
     });
     return;
   }
 
-  // Collect all participants with pagination
-  const allParticipants: string[] = [];
-  let cursor: string | undefined;
-
-  do {
-    const queryResp = await client.apps.datastore.query({
-      datastore: ParticipantsDatastore.name,
-      expression: "#event_id = :event_id",
-      expression_attributes: { "#event_id": "event_id" },
-      expression_values: { ":event_id": eventId },
-      ...(cursor ? { cursor } : {}),
-    });
-
-    if (!queryResp.ok) {
-      await client.chat.postEphemeral({
-        channel: channelId,
-        user: triggeringUser,
-        text: `:x: Failed to retrieve participants: ${queryResp.error}`,
-      });
-      return;
-    }
-
-    for (const item of queryResp.items ?? []) {
-      const userId = item["user_id"];
-      if (typeof userId === "string" && userId.length > 0) {
-        allParticipants.push(userId);
-      }
-    }
-
-    cursor = typeof queryResp.next_cursor === "string"
-      ? queryResp.next_cursor
-      : undefined;
-  } while (cursor);
-
-  if (allParticipants.length < 3) {
-    await client.chat.postEphemeral({
-      channel: channelId,
-      user: triggeringUser,
-      text:
-        `:x: Not enough participants to shuffle. Need at least 3, currently have *${allParticipants.length}*. Wait for more people to join!`,
-    });
-    return;
-  }
-
-  const receivers = createDerangement(allParticipants);
-
-  if (!receivers) {
-    await client.chat.postEphemeral({
-      channel: channelId,
-      user: triggeringUser,
-      text: ":x: Failed to generate assignments. Please try again.",
-    });
-    return;
-  }
-
-  // Send a DM to each participant with their assignment
-  const dmErrors: string[] = [];
-  const rules = typeof event["rules"] === "string" ? event["rules"] : "";
-  const exchangeDate = typeof event["exchange_date"] === "string"
-    ? event["exchange_date"]
-    : "";
-
-  for (let i = 0; i < allParticipants.length; i++) {
-    const giver = allParticipants[i];
-    const receiver = receivers[i];
-
-    const dmResp = await client.conversations.open({ users: giver });
-
-    if (!dmResp.ok || !dmResp.channel?.id) {
-      dmErrors.push(`<@${giver}>`);
-      continue;
-    }
-
-    const dmChannel = dmResp.channel.id;
-
-    const sendResp = await client.chat.postMessage({
-      channel: dmChannel,
-      blocks: [
-        {
-          type: "header",
-          text: {
-            type: "plain_text",
-            text: ":santa: Your Secret Santa Assignment!",
-            emoji: true,
-          },
-        },
-        {
-          type: "section",
-          text: {
-            type: "mrkdwn",
-            text:
-              `You are the Secret Santa for *<@${receiver}>*! :gift:\n\nRemember to keep it a secret until gift exchange day!`,
-          },
-        },
-        {
-          type: "section",
-          fields: [
-            {
-              type: "mrkdwn",
-              text: `:calendar: *Gift Exchange Date*\n${exchangeDate}`,
-            },
-            {
-              type: "mrkdwn",
-              text: `:bust_in_silhouette: *Organizer*\n<@${triggeringUser}>`,
-            },
-          ],
-        },
-        {
-          type: "section",
-          text: {
-            type: "mrkdwn",
-            text: `*Event Rules:*\n${rules}`,
-          },
-        },
-      ],
-      text:
-        `Your Secret Santa assignment: you're buying a gift for <@${receiver}>!`,
-    });
-
-    if (!sendResp.ok) {
-      dmErrors.push(`<@${giver}>`);
-    }
-  }
-
-  // Mark the event as picked
   await client.apps.datastore.put({
     datastore: EventsDatastore.name,
-    item: { ...event, status: "picked" },
+    item: { ...event, status: "cancelled" },
   });
 
-  // Post a public summary to the channel
-  const successCount = allParticipants.length - dmErrors.length;
-  const summaryText = dmErrors.length === 0
-    ? `:white_check_mark: *Secret Santa assignments sent!* All ${successCount} participants have received their DMs. Check your messages! :gift:`
-    : `:warning: Assignments sent to ${successCount} of ${allParticipants.length} participants. Could not reach: ${
-      dmErrors.join(", ")
-    }`;
-
-  const eventChannelId = typeof event["channel_id"] === "string"
-    ? event["channel_id"]
-    : channelId;
-
   await client.chat.postMessage({
-    channel: eventChannelId,
-    text: summaryText,
+    channel: channelId,
+    text: `:x: The Secret Santa event has been cancelled by <@${userId}>.`,
   });
 }
 
@@ -342,7 +222,13 @@ export default SlackFunction(
   // under strict mode. We annotate the context as unknown and cast once.
   async (ctx: unknown) => {
     const { inputs, client } = ctx as MainHandlerContext;
-    const { channel_id, exchange_date, rules, invoking_user } = inputs;
+    const {
+      channel_id,
+      exchange_date,
+      shuffle_date,
+      rules,
+      invoking_user,
+    } = inputs;
     const event_id = crypto.randomUUID();
 
     // 1. Persist the event
@@ -353,6 +239,7 @@ export default SlackFunction(
         channel_id,
         rules,
         exchange_date,
+        shuffle_date: String(shuffle_date),
         created_by: invoking_user,
         message_ts: "",
         status: "open",
@@ -364,6 +251,10 @@ export default SlackFunction(
     }
 
     // 2. Post the invitation message with interactive buttons
+    const shuffleDateIso = new Date(shuffle_date * 1000).toISOString();
+    const shuffleDateDisplay =
+      `<!date^${shuffle_date}^{date_long} at {time}|${shuffleDateIso}>`;
+
     const blocks = [
       {
         type: "header",
@@ -397,6 +288,10 @@ export default SlackFunction(
           },
           {
             type: "mrkdwn",
+            text: `:alarm_clock: *Assignments sent on*\n${shuffleDateDisplay}`,
+          },
+          {
+            type: "mrkdwn",
             text: `:bust_in_silhouette: *Organizer*\n<@${invoking_user}>`,
           },
         ],
@@ -423,28 +318,29 @@ export default SlackFunction(
             type: "button",
             text: {
               type: "plain_text",
-              text: "Shuffle & Send Assignments :game_die:",
+              text: "Cancel Event :x:",
               emoji: true,
             },
-            action_id: SHUFFLE_ACTION_ID,
+            style: "danger",
+            action_id: CANCEL_ACTION_ID,
             value: event_id,
             confirm: {
               title: {
                 type: "plain_text",
-                text: "Send Secret Santa Assignments?",
+                text: "Cancel this Secret Santa?",
               },
               text: {
                 type: "mrkdwn",
                 text:
-                  "This will randomly pair all participants and send each person a DM with their assignment. *This cannot be undone.*",
+                  "This will cancel the event and no assignments will be sent. *This cannot be undone.*",
               },
               confirm: {
                 type: "plain_text",
-                text: "Yes, send assignments",
+                text: "Yes, cancel the event",
               },
               deny: {
                 type: "plain_text",
-                text: "Not yet",
+                text: "Keep it going",
               },
             },
           },
@@ -479,13 +375,29 @@ export default SlackFunction(
         channel_id,
         rules,
         exchange_date,
+        shuffle_date: String(shuffle_date),
         created_by: invoking_user,
         message_ts: msgResp.ts ?? "",
         status: "open",
       },
     });
 
-    // 4. Keep the function alive so button handlers remain active
+    // 4. Schedule the auto-shuffle trigger
+    await client.workflows.triggers.create({
+      type: "scheduled",
+      name: "Secret Santa Auto-shuffle",
+      workflow: "#/workflows/auto_shuffle_workflow",
+      inputs: {
+        event_id: { value: event_id },
+        channel_id: { value: channel_id },
+      },
+      schedule: {
+        start_time: shuffleDateIso,
+        frequency: { type: "once" },
+      },
+    });
+
+    // 5. Keep the function alive so button handlers remain active
     return { completed: false };
   },
 )
@@ -502,10 +414,10 @@ export default SlackFunction(
     },
   )
   .addBlockActionsHandler(
-    SHUFFLE_ACTION_ID,
+    CANCEL_ACTION_ID,
     async (ctx: unknown) => {
       const { action, body, client } = ctx as BlockActionContext;
-      await processShuffleAction(
+      await processCancelAction(
         client,
         action.value ?? "",
         body.user.id,
