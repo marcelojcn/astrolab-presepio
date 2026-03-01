@@ -4,7 +4,6 @@
 [![Deno](https://img.shields.io/badge/deno-v2.x-000000?logo=deno&logoColor=white)](https://deno.com)
 [![License: MIT](https://img.shields.io/github/license/marcelojcn/astrolab-presepio)](LICENSE)
 [![GitHub Stars](https://img.shields.io/github/stars/marcelojcn/astrolab-presepio?style=social)](https://github.com/marcelojcn/astrolab-presepio/stargazers)
-[![Known Vulnerabilities](https://snyk.io/test/github/marcelojcn/astrolab-presepio/badge.svg)](https://snyk.io/test/github/marcelojcn/astrolab-presepio)
 
 A Secret Santa Slack automation built with the [Slack Deno SDK](https://docs.slack.dev/tools/deno-slack-sdk/). Organizers set up a gift exchange in seconds — participants join with a single click, and assignments are sent automatically on a scheduled date via private DM.
 
