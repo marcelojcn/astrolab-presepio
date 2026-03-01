@@ -22,7 +22,7 @@ A Secret Santa Slack automation built with the [Slack Deno SDK](https://docs.sla
 
 - A Slack workspace on a **paid plan** (Pro, Business+, or Enterprise Grid) — the Slack Next-gen platform / Automations feature is required.
 - [Slack CLI](https://api.slack.com/automation/cli/install) installed and authenticated.
-- [Deno](https://deno.com/) v1.37 or later installed.
+- [Deno](https://deno.com/) v2.x installed.
 
 ---
 
@@ -30,12 +30,14 @@ A Secret Santa Slack automation built with the [Slack Deno SDK](https://docs.sla
 
 ```
 astrolab-presepio/
-├── deno.jsonc                      # Deno config & SDK imports
+├── deno.jsonc                      # Deno config, tasks & SDK imports
 ├── manifest.ts                     # App manifest (workflows, datastores, scopes)
 ├── datastores/
 │   └── participants.ts             # EventsDatastore + ParticipantsDatastore
 ├── functions/
 │   └── setup_secret_santa.ts      # Core function: setup, join, and shuffle logic
+├── utils/
+│   └── secret_santa.ts            # Pure helpers: shuffle + derangement algorithm
 ├── workflows/
 │   └── start_secret_santa.ts      # Workflow wiring the setup form → function
 └── triggers/
@@ -44,12 +46,14 @@ astrolab-presepio/
 
 ---
 
-## Step-by-step tutorial
+## Part 1 — Test it locally
+
+Use local mode to iterate quickly without a permanent deployment. The app runs on your machine and connects to Slack via a tunnel.
 
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/your-org/astrolab-presepio.git
+git clone https://github.com/marcelojcn/astrolab-presepio.git
 cd astrolab-presepio
 ```
 
@@ -61,15 +65,15 @@ slack login
 
 Follow the prompts to authenticate with your Slack workspace.
 
-### 3. Run the app locally (for development)
+### 3. Start the local dev server
 
 ```bash
 slack run
 ```
 
-This starts the app in local development mode. Keep this terminal open — changes to source files are picked up automatically.
+Keep this terminal open. The app is now live in your workspace and any source changes are picked up automatically.
 
-### 4. Create the trigger
+### 4. Create a local trigger
 
 In a **separate terminal**, run:
 
@@ -77,56 +81,64 @@ In a **separate terminal**, run:
 slack trigger create --trigger-def triggers/start_trigger.ts
 ```
 
-Select the workspace when prompted. The CLI will output a shareable link that looks like:
+Select the workspace when prompted. The CLI outputs a link like:
 
 ```
 https://slack.com/shortcuts/Ft0000000000/xxxxxxxxxxxxxxxxxxxx
 ```
 
-Copy this URL — this is what admins use to open the setup form.
+This link is tied to your local dev instance — it only works while `slack run` is active. Use it to test the full flow before deploying.
 
-### 5. Share the trigger link
+---
 
-Paste the trigger link anywhere in Slack (a message, a channel bookmark, a canvas). Anyone who clicks it can create a new Secret Santa event.
+## Part 2 — Deploy to Slack
 
-### 6. Create a Secret Santa event
+Deploy the app to Slack's infrastructure so it runs 24/7 without your machine.
 
-1. Click the trigger link.
+### 1. Deploy the app
+
+```bash
+slack deploy
+```
+
+The CLI bundles and uploads everything. Once complete, the app is hosted by Slack.
+
+### 2. Create a production trigger
+
+```bash
+slack trigger create --trigger-def triggers/start_trigger.ts
+```
+
+> **Note:** this creates a new trigger pointing at the deployed app — it is separate from any trigger created during local testing. Copy the new URL; this is the permanent one to share.
+
+---
+
+## Part 3 — How to use it
+
+### Set up a Secret Santa event
+
+1. Paste the trigger link anywhere in Slack (a message, a channel bookmark, a canvas) and click it.
 2. A modal appears — fill in:
    - **Channel** — where the invitation will be posted.
    - **Gift Exchange Date** — the day participants will trade presents.
    - **Rules / Description** — budget, theme, or any other guidelines.
 3. Click **Launch Event**.
 
-The bot posts an invitation message to the chosen channel with two buttons.
+The bot posts an invitation to the chosen channel with two buttons.
 
-### 7. Participants join
+### Join the event
 
-Team members in the channel click **Join Secret Santa 🎁**. They receive a private (ephemeral) confirmation. The button stays active indefinitely, so latecomers can join at any time.
+Team members in the channel click **Join Secret Santa 🎁**. They receive an ephemeral confirmation visible only to them. The button stays active indefinitely, so latecomers can join at any time.
 
-### 8. Run the shuffle
+### Send assignments
 
-When you're ready to send assignments, anyone clicks **Shuffle & Send Assignments 🎲**. A confirmation dialog appears — click **Yes, send assignments** to proceed.
+When registration is closed, anyone clicks **Shuffle & Send Assignments 🎲**. A confirmation dialog appears — click **Yes, send assignments** to proceed.
 
-- Each participant receives a private DM with the name of the person they are buying a gift for, the exchange date, and the event rules.
-- The channel receives a summary message confirming all assignments were sent.
-- The shuffle can only be run once per event.
+- Each participant receives a **private DM** with the name of the person they are buying a gift for, the exchange date, and the event rules.
+- The channel receives a **public summary** confirming how many assignments were sent.
+- The shuffle can only be run **once per event**.
 
-> **Minimum requirement:** at least 3 participants must have joined before the shuffle can run.
-
-### 9. Deploy to production
-
-When you're ready to go live (no longer running `slack run`), deploy the app:
-
-```bash
-slack deploy
-```
-
-Then recreate the trigger pointing at the deployed app:
-
-```bash
-slack trigger create --trigger-def triggers/start_trigger.ts
-```
+> **Minimum:** at least 3 participants must have joined before the shuffle can run.
 
 ---
 
