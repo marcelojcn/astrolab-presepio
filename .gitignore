@@ -1,0 +1,18 @@
+# Slack CLI generated artifacts
+.slack/dist/
+
+# Environment variables — never commit secrets
+.env
+.env.local
+.env.*.local
+
+# macOS
+.DS_Store
+
+# Editor
+# .vscode/settings.json is committed — it configures the Deno language server
+.vscode/*.code-snippets
+.idea/
+
+# Deno cache — restored by `deno cache manifest.ts` in CI
+.deno/

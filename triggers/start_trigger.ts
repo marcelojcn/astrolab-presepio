@@ -12,7 +12,8 @@ import { StartSecretSantaWorkflow } from "../workflows/start_secret_santa.ts";
 const startTrigger: Trigger<typeof StartSecretSantaWorkflow.definition> = {
   type: TriggerTypes.Shortcut,
   name: "Start Secret Santa",
-  description: "Open the setup form to launch a Secret Santa event in a channel",
+  description:
+    "Open the setup form to launch a Secret Santa event in a channel",
   workflow: `#/workflows/${StartSecretSantaWorkflow.definition.callback_id}`,
   inputs: {
     interactivity: {

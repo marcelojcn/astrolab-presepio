@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  ci:
+    name: Format · Lint · Type-check · Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          # Pin to the same major version used locally
+          deno-version: v2.x
+
+      - name: Cache dependencies
+        # Pre-downloads all remote modules so subsequent steps work offline
+        run: deno cache manifest.ts
+
+      - name: Format check
+        # Equivalent to `prettier --check` — enforces consistent formatting
+        run: deno fmt --check
+
+      - name: Lint
+        # Equivalent to `eslint` — enforces style and correctness rules
+        run: deno lint
+
+      - name: Type check
+        # Equivalent to `tsc --noEmit` — verifies TypeScript correctness
+        run: deno check manifest.ts
+
+      - name: Test
+        run: deno test --allow-env
